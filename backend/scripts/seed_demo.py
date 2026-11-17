@@ -6,8 +6,11 @@ from src.config.domain import DOMAIN
 from src.models.user import User
 from src.models.study import Study
 from src.models.observation import Observation
+from src.models.sequential import SequentialPlan
 from src.models import run,review,audit
+from src.services.sequential_plans import alpha_to_units
 from src.utils.security import hash_password
+from src.utils.serializers import now as now_iso
 
 def seed():
     Base.metadata.create_all(engine)
@@ -37,7 +40,19 @@ def seed():
                 key=f'DEMO-{k+1}-{n+1:04}'
                 if not db.scalar(select(Observation.id).where(Observation.study_id==study.id,Observation.source_key==key)):
                     db.add(Observation(study_id=study.id,source_key=key,values=values))
+            # 预注册分阶段方案（仅锁定门槛与额度，不预填任何揭盲/点击结果）
+            plan_name=name+' · 分阶段预注册'
+            if not db.scalar(select(SequentialPlan).where(SequentialPlan.name==plan_name)):
+                spec=[
+                    {'stage':1,'reach_a':4000,'reach_b':4000,'alpha_k':0.010,'alpha_units':alpha_to_units(0.010)},
+                    {'stage':2,'reach_a':8000,'reach_b':8000,'alpha_k':0.015,'alpha_units':alpha_to_units(0.015)},
+                    {'stage':3,'reach_a':12000,'reach_b':12000,'alpha_k':0.025,'alpha_units':alpha_to_units(0.025)},
+                ]
+                db.add(SequentialPlan(study_id=study.id,name=plan_name,status='active',
+                    alpha_total=alpha_to_units(0.05),alpha_spent=0,looks=spec,
+                    stop_reason='',stop_stage=0,stop_note='',
+                    created_by='admin@demo.local',created_at=now_iso()))
         db.commit()
-        counts={model.__tablename__:db.scalar(select(func.count()).select_from(model)) for model in (User,Study,Observation)}
+        counts={model.__tablename__:db.scalar(select(func.count()).select_from(model)) for model in (User,Study,Observation,SequentialPlan)}
         print(json.dumps(counts));return counts
 if __name__=='__main__': seed()
